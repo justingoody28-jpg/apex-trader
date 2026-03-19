@@ -687,24 +687,52 @@ export default function App(){
   var refresh=useCallback(function(){
     var c=cfgRef.current;
     setDataLoading(true);setDataSource("live");
-    var results={},idx=0,tickers=TICKERS.slice();
-    function fetchNext(){
-      if(idx>=tickers.length){
+    // Use batch quote endpoint — fetches all 20 tickers in ONE API call (1 credit)
+    var symbols=TICKERS.join(",");
+    fetch("/api/market?source=td&endpoint=quote?symbol="+symbols)
+      .then(function(r){return r.json();})
+      .then(function(batch){
+        // Twelve Data returns object keyed by ticker when multiple symbols requested
         var ns=TICKERS.map(function(t,i){
-          var d=results[t];
-          return(d&&d.q&&d.h)?buildStockFromReal(t,i,c,d.q,d.h):genStock(t,i,c);
+          var q=batch[t]||batch;
+          // If only 1 ticker was returned directly (fallback), wrap it
+          if(q&&q.close){
+            // Build stock with real quote but simulated history
+            var cur=parseFloat(q.close)||BASE[t]||50;
+            var prev=parseFloat(q.previous_close)||cur;
+            var chg=cur>0?((cur-prev)/prev*100):0;
+            var vol=parseFloat(q.volume)||5e6;
+            var avgVol=parseFloat(q.average_volume)||8e6;
+            var vr=+(vol/avgVol).toFixed(2)||1;
+            var h52hi=parseFloat((q.fifty_two_week||{}).high)||cur*1.3;
+            var dip=(h52hi-cur)/h52hi*100;
+            var prices=genPrices(prev,90,0.018);
+            prices[prices.length-1]=cur;
+            var rsi=lastRSI(prices),mh=macdH(prices);
+            var sig="HOLD";
+            if(dip>=c.dipMin&&dip<=c.dipMax){
+              if(rsi>=c.rsiRecovery&&rsi<60&&mh>0&&vr>=c.volMult)sig="STRONG_BUY";
+              else if(rsi>=c.rsiOversold&&mh>-0.5)sig="BUY";
+              else if(rsi<c.rsiOversold)sig="WATCH";
+            }else if(dip<5){if(rsi>70)sig="SELL";}
+            else if(dip>25){sig=rsi<30?"WATCH":"SELL";}
+            var score=Math.min(100,Math.max(0,Math.round(
+              (dip>=5&&dip<=20?30:0)+(rsi>=35&&rsi<=55?25:rsi<35?15:0)+(mh>0?25:0)+(vr>=1.3?20:vr>=1?10:0)
+            )));
+            return {ticker:t,prices,cur:+cur.toFixed(2),h52:+h52hi.toFixed(2),dip:+dip.toFixed(1),
+              rsi,mh,chg:+chg.toFixed(2),vr,sig,score,sector:SECTORS[i%20],
+              sl:+(cur*(1-c.sl/100)).toFixed(2),tp:+(cur*(1+c.tp/100)).toFixed(2),
+              entry:"$"+(cur*0.98).toFixed(2)+"-$"+(cur*1.01).toFixed(2)};
+          }
+          return genStock(t,i,c);
         });
         setStocks(ns);setLastR(new Date());setDataLoading(false);
-        return;
-      }
-      var t=tickers[idx++];
-      Promise.all([
-        fetch("/api/market?source=td&endpoint=quote?symbol="+t).then(function(r){return r.json();}),
-        fetch("/api/market?source=td&endpoint=time_series?symbol="+t+"&interval=1day&outputsize=90").then(function(r){return r.json();})
-      ]).then(function(a){results[t]={q:a[0],h:a[1]};setTimeout(fetchNext,250);})
-       .catch(function(){results[t]=null;setTimeout(fetchNext,250);});
-    }
-    fetchNext();
+      })
+      .catch(function(){
+        // Fallback to simulated on error
+        setStocks(TICKERS.map(function(t,i){return genStock(t,i,c);}));
+        setLastR(new Date());setDataLoading(false);setDataSource("simulated");
+      });
   },[]);
 
   useEffect(function(){refresh();},[refresh]);
