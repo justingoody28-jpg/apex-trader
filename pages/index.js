@@ -685,12 +685,7 @@ export default function App(){
   }
 
   var refresh=useCallback(function(){
-    var c=cfgRef.current,key=tdKeyRef.current||"";
-    if(!key){
-      setStocks(TICKERS.map(function(t,i){return genStock(t,i,c);}));
-      setLastR(new Date());setDataSource("simulated");
-      return;
-    }
+    var c=cfgRef.current;
     setDataLoading(true);setDataSource("live");
     var results={},idx=0,tickers=TICKERS.slice();
     function fetchNext(){
