@@ -16,8 +16,8 @@ export default async function handler(req, res) {
 
     const r = await fetch(url);
     const data = await r.json();
-    // Cache for 5 minutes
-    res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate');
+    // Cache for 5 minutes to avoid burning rate limits on repeat loads
+    res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
     return res.json(data);
   } catch (e) {
     return res.status(500).json({ error: e.message });
